@@ -1,0 +1,213 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Duckiebot AI Navigation Dashboard | DB21J Ente</title>
+  <link rel="stylesheet" href="/static/styles.css">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600;700&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+</head>
+<body>
+
+  <!-- Top Navbar -->
+  <header class="top-nav">
+    <div class="nav-brand">
+      <div class="bot-badge">🦆</div>
+      <div>
+        <h1 class="nav-title">Duckiebot DB21J AI Navigation</h1>
+        <p class="nav-subtitle">Jetson Nano 4GB • Duckietown Ente • YOLOv11 + Cloud LLM</p>
+      </div>
+    </div>
+
+    <!-- Subsystem Status Badges -->
+    <div class="nav-status-group">
+      <div id="modeBadge" class="status-pill mode-sim">SIMULATION</div>
+      <div id="stateBadge" class="status-pill state-idle">IDLE</div>
+      
+      <div class="status-item" title="Duckiebot Connection Status">
+        <span id="robotIndicator" class="dot dot-green"></span>
+        <span id="robotHostText">entebot209.local</span>
+      </div>
+
+      <div class="status-item" title="Camera Status">
+        <span id="cameraIndicator" class="dot dot-green"></span>
+        <span id="cameraText">Camera OK</span>
+      </div>
+
+      <div class="status-item" title="LLM Provider Status">
+        <span id="llmIndicator" class="dot dot-yellow"></span>
+        <span id="llmText">LLM Ready</span>
+      </div>
+
+      <div class="status-item battery-group" title="Battery Level">
+        <span class="battery-icon">⚡</span>
+        <span id="batteryPct">88%</span>
+        <span id="batteryVolt" class="muted-text">(12.2V)</span>
+      </div>
+
+      <!-- Emergency Stop Button -->
+      <button id="eStopBtn" class="btn btn-estop" onclick="triggerEStop()">EMERGENCY STOP</button>
+      <button id="clearEStopBtn" class="btn btn-clear-estop" onclick="clearEStop()" style="display:none;">RESET E-STOP</button>
+    </div>
+  </header>
+
+  <!-- Error / Alert Banner -->
+  <div id="alertBanner" class="alert-banner" style="display:none;">
+    <span id="alertMessage"></span>
+    <button class="alert-close" onclick="closeAlert()">×</button>
+  </div>
+
+  <!-- Main Container -->
+  <main class="dashboard-grid">
+
+    <!-- Left Column: Video & Telemetry -->
+    <section class="grid-col left-col">
+
+      <!-- Camera Feed Card -->
+      <div class="card video-card">
+        <div class="card-header">
+          <div class="card-title">
+            <span class="icon">📷</span> Live Camera Feed & Vision HUD
+          </div>
+          <div class="stream-stats">
+            <span id="streamFps">15.0 FPS</span>
+            <span id="streamLatency">42ms latency</span>
+          </div>
+        </div>
+
+        <div class="video-container">
+          <img id="cameraStream" src="/api/camera/stream" alt="Live Duckiebot Camera" onerror="handleStreamError(this)">
+          <div id="videoOverlay" class="video-overlay-msg" style="display:none;">Connecting to camera...</div>
+        </div>
+
+        <div class="card-footer video-controls">
+          <button class="btn btn-secondary btn-sm" onclick="reloadStream()">Refresh Stream</button>
+          <span class="detection-counter">Detections: <strong id="detCount">0</strong></span>
+          <span class="lane-status">Lane: <strong id="laneStatusText">Searching</strong></span>
+        </div>
+      </div>
+
+      <!-- Telemetry & Sensor Card -->
+      <div class="card telemetry-card">
+        <div class="card-header">
+          <div class="card-title"><span class="icon">📊</span> Robot Telemetry & Sensors</div>
+        </div>
+        <div class="telemetry-grid">
+          <div class="metric-box">
+            <span class="metric-label">Linear Speed (v)</span>
+            <span id="metricSpeedV" class="metric-val">0.00 m/s</span>
+          </div>
+          <div class="metric-box">
+            <span class="metric-label">Angular Speed (ω)</span>
+            <span id="metricOmega" class="metric-val">0.00 rad/s</span>
+          </div>
+          <div class="metric-box">
+            <span class="metric-label">Forward ToF Range</span>
+            <span id="metricToF" class="metric-val">1.20 m</span>
+          </div>
+          <div class="metric-box">
+            <span class="metric-label">Wheel Odometry</span>
+            <span id="metricTicks" class="metric-val">L: 100 | R: 100</span>
+          </div>
+        </div>
+      </div>
+
+    </section>
+
+    <!-- Right Column: Natural Language Input, Goal, Controls, Objects, Logs -->
+    <section class="grid-col right-col">
+
+      <!-- Natural Language Destination Input Card -->
+      <div class="card nlp-card">
+        <div class="card-header">
+          <div class="card-title"><span class="icon">💬</span> Natural Language Mission Planner</div>
+        </div>
+        <div class="nlp-body">
+          <div class="input-row">
+            <input 
+              type="text" 
+              id="promptInput" 
+              class="nlp-input" 
+              placeholder="e.g. 'Go to the laboratory', 'Find the red object', 'Follow the lane'"
+              onkeydown="if(event.key === 'Enter') submitPrompt()"
+            >
+            <button id="submitPromptBtn" class="btn btn-primary" onclick="submitPrompt()">Interpret & Plan</button>
+          </div>
+
+          <!-- Prompt Quick Chips -->
+          <div class="prompt-chips">
+            <span class="chip-label">Quick Prompts:</span>
+            <button class="chip" onclick="setPrompt('Go to the laboratory')">🏛️ Go to Laboratory</button>
+            <button class="chip" onclick="setPrompt('Find the red object near the entrance')">🔴 Find Red Object</button>
+            <button class="chip" onclick="setPrompt('Follow the lane')">🛣️ Follow Lane</button>
+            <button class="chip" onclick="setPrompt('Navigate to the pickup point')">📦 Pickup Point</button>
+            <button class="chip" onclick="setPrompt('Stop when you reach the target')">🛑 Stop Robot</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Interpreted Goal & Navigation Controls Card -->
+      <div class="card goal-card">
+        <div class="card-header">
+          <div class="card-title"><span class="icon">🎯</span> Active Mission & Control Stack</div>
+          <span id="activeTaskId" class="task-badge">No Active Task</span>
+        </div>
+        
+        <div class="goal-details">
+          <div class="goal-prop">
+            <span class="prop-label">Parsed Intent:</span>
+            <strong id="goalIntent" class="prop-val">-</strong>
+          </div>
+          <div class="goal-prop">
+            <span class="prop-label">Target Destination:</span>
+            <strong id="goalTarget" class="prop-val highlight">-</strong>
+          </div>
+          <div class="goal-prop">
+            <span class="prop-label">Visual Indicator:</span>
+            <span id="goalIndicator" class="prop-val">-</span>
+          </div>
+          <div class="goal-prop">
+            <span class="prop-label">Clarification:</span>
+            <span id="goalClarification" class="prop-val muted">None required</span>
+          </div>
+        </div>
+
+        <!-- Task Execution Action Controls -->
+        <div class="action-btn-group">
+          <button id="startNavBtn" class="btn btn-success" onclick="startNavigation()" disabled>▶ Start Navigation</button>
+          <button id="pauseNavBtn" class="btn btn-warning" onclick="pauseNavigation()" disabled>⏸ Pause</button>
+          <button id="resumeNavBtn" class="btn btn-info" onclick="resumeNavigation()" disabled>⏯ Resume</button>
+          <button id="stopNavBtn" class="btn btn-danger" onclick="stopNavigation()" disabled>⏹ Stop</button>
+        </div>
+      </div>
+
+      <!-- Detected Objects Card -->
+      <div class="card objects-card">
+        <div class="card-header">
+          <div class="card-title"><span class="icon">👁️</span> Computer Vision Observations</div>
+        </div>
+        <div class="objects-container" id="objectsList">
+          <p class="muted-text">Awaiting visual detections...</p>
+        </div>
+      </div>
+
+      <!-- System Logs & Console Card -->
+      <div class="card logs-card">
+        <div class="card-header">
+          <div class="card-title"><span class="icon">📜</span> System Events & Logs</div>
+          <button class="btn btn-xs btn-outline" onclick="fetchLogs()">Refresh</button>
+        </div>
+        <div class="logs-console" id="logsConsole">
+          <!-- Populated dynamically via JS -->
+        </div>
+      </div>
+
+    </section>
+
+  </main>
+
+  <script src="/static/app.js"></script>
+</body>
+</html>
